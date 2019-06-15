@@ -1,0 +1,8 @@
+name: libndt7-unix-openssl
+docker: bassosimone/mk-debian
+dependencies:
+- github.com/openssl/openssl
+targets:
+  executables:
+    ndt7-unix-openssl:
+      compile: [ndt7-unix-openssl.c]
