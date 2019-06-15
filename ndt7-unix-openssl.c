@@ -41,12 +41,12 @@
 /* This is the callback called when an OpenSSL function fails. */
 #define NDT7_CB_TLS_ERROR(what)                                                \
   do {                                                                         \
-    fprintf(stderr, "===  BEGIN %s FAILURE LOG ===\n", what);                  \
+    fprintf(stderr, "=== BEGIN %s FAILURE LOG ===\n", what);                   \
     if (errno != 0) {                                                          \
       fprintf(stderr, "system error: %s\n", strerror(errno));                  \
     }                                                                          \
     ERR_print_errors_fp(stderr);                                               \
-    fprintf(stderr, "===  END %s FAILURE LOG ===\n", what);                    \
+    fprintf(stderr, "=== END %s FAILURE LOG ===\n", what);                     \
   } while (0)
 
 #include "libndt7-unix-openssl.h"
