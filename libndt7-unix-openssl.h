@@ -10,12 +10,12 @@
  *
  * 1. the main() is ignoring the SIGPIPE signal;
  *
- * 2. the main() has called SSL_library_init;
+ * 2. the main() has called SSL_library_init and SSL_load_error_strings;
  *
  * 3. the main() has setup an alarm() to interrupt us if we have
  *    been running for too much time.
  *
- * See the example program for more insights.
+ * See the ndt7-unix-openssl.c for more insights.
  */
 
 /*
