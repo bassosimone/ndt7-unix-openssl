@@ -44,8 +44,18 @@ build and `make` to build. You'll need to have installed `make`, a
 recent version of `gcc`, and the OpenSSL development package. The code
 should work with OpenSSL 1.0.2+ and LibreSSL.
 
+Note that, by default, this code assumes that the CA bundle path is
+at `/etc/ssl/cert.pem`. Change this by setting
+
+```
+export CFLAGS="-DCA_BUNDLE_PATH=/path/to/CA/bundle
+```
+
+_before_ running CMake.
+
 Note that, by default, the library performs TLS certificate verification
-and you need to `export CFLAGS="-DNDT7_INSECURE"` to disable that.
+and you need to `export CFLAGS="-DNDT7_INSECURE"` to disable that. Make
+sure you export that variable _before_ running CMake.
 
 As an implementation detail, we currently use [MKBuild](
 https://github.com/measurement-kit/mkbuild) to keep
