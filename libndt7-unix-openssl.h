@@ -22,6 +22,11 @@
  * Macros allowing to extend this implementation.
  */
 
+#ifndef NDT7_TESTABLE
+/** Allows to rename specific symbols for running unit tests. */
+#define NDT7_TESTABLE(symbol) symbol
+#endif
+
 #ifndef NDT7_CB_HTTP_REQUEST
 /** Called with the request we're sending to negotiate WebSocket. @param request
  * is a C string containing the whole request. */
@@ -32,14 +37,6 @@
 /** Called with an header of the negotiate-WebSocket response. @param header is
  * a C string containing the header that was read. */
 #define NDT7_CB_HTTP_RESPONSE_HEADER(header) /* Nothing */
-#endif
-
-#ifndef NDT7_CB_TLS_ERROR
-/** Called when a TLS level error occurs. Note that the error may be
- * cause by other lower-level errors. You should inspect the OpenSSL error
- * queue in this case to find out what went wrong. @param what is a C
- * string containing the name of the operation that failed. */
-#define NDT7_CB_TLS_ERROR(what) /* Nothing */
 #endif
 
 #ifndef NDT7_CB_NDT7_BEGIN_READ_MEASUREMENT
@@ -63,6 +60,14 @@
  * ndt7 subtest. @param elapsed is the number of elapsed millisecond. @param
  * total is the number of bytes that have been sent so far. */
 #define NDT7_CB_NDT7_ON_APP_INFO_UPLOAD(elapsed, total) /* Nothing */
+#endif
+
+#ifndef NDT7_CB_TLS_ERROR
+/** Called when a TLS level error occurs. Note that the error may be
+ * caused by other lower-level errors. You should inspect the OpenSSL
+ * error queue in this case to find out what went wrong. @param what
+ * is a C string containing the name of the operation that failed. */
+#define NDT7_CB_TLS_ERROR(what) /* Nothing */
 #endif
 
 #ifndef NDT7_CB_WS_OPCODE_FIN_LENGTH
@@ -226,25 +231,25 @@ ndt7_connect_(const struct ndt7_settings *settings) {
     ctx.err = NDT7_ERR_INVALID_ARGUMENT;
     return ctx;
   }
-  const SSL_METHOD *method = SSLv23_method();
+  const SSL_METHOD *method = NDT7_TESTABLE(SSLv23_method)();
   if (method == NULL) {
     ctx.err = NDT7_ERR_SSLv23_METHOD;
     return ctx;
   }
-  SSL_CTX *sslctx = SSL_CTX_new(method);
+  SSL_CTX *sslctx = NDT7_TESTABLE(SSL_CTX_new)(method);
   if (sslctx == NULL) {
     ctx.err = NDT7_ERR_SSL_CTX_NEW;
     return ctx;
   }
 #ifndef NDT7_INSECURE
-  if (SSL_CTX_load_verify_locations(
+  if (NDT7_TESTABLE(SSL_CTX_load_verify_locations)(
         sslctx, settings->ca_bundle_path, NULL) != 1) {
     SSL_CTX_free(sslctx);
     ctx.err = NDT7_ERR_SSL_CTX_LOAD_VERIFY_LOCATIONS;
     return ctx;
   }
 #endif
-  ctx.conn = BIO_new_ssl_connect(sslctx);
+  ctx.conn = NDT7_TESTABLE(BIO_new_ssl_connect)(sslctx);
   if (ctx.conn == NULL) {
     SSL_CTX_free(sslctx);
     ctx.err = NDT7_ERR_BIO_NEW_SSL_CONNECT;
@@ -253,17 +258,17 @@ ndt7_connect_(const struct ndt7_settings *settings) {
   SSL_CTX_free(sslctx); /* Is reference counted */
 #ifndef NDT7_INSECURE
   SSL *ssl = NULL;
-  if (BIO_get_ssl(ctx.conn, &ssl) != 1) {
+  if (NDT7_TESTABLE(BIO_get_ssl)(ctx.conn, &ssl) != 1) {
     ctx.err = NDT7_ERR_BIO_GET_SSL;
     return ctx;
   }
-  X509_VERIFY_PARAM *param = SSL_get0_param(ssl);
+  X509_VERIFY_PARAM *param = NDT7_TESTABLE(SSL_get0_param)(ssl);
   if (param == NULL) {
     ctx.err = NDT7_ERR_SSL_GET0_PARAM;
     return ctx;
   }
   X509_VERIFY_PARAM_set_hostflags(param, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
-  if (X509_VERIFY_PARAM_set1_host(
+  if (NDT7_TESTABLE(X509_VERIFY_PARAM_set1_host)(
         param, settings->hostname, strlen(settings->hostname)) != 1) {
     ctx.err = NDT7_ERR_X509_VERIFY_PARAM_SET1_HOST;
     return ctx;
@@ -271,22 +276,22 @@ ndt7_connect_(const struct ndt7_settings *settings) {
   SSL_set_verify(ssl, SSL_VERIFY_PEER, NULL);
 #endif
   char endpoint[128];
-  int epntsiz = snprintf(endpoint, sizeof(endpoint), "%s:%s",
-                         settings->hostname, settings->port);
+  int epntsiz = NDT7_TESTABLE(snprintf)(endpoint, sizeof(endpoint), "%s:%s",
+                                        settings->hostname, settings->port);
   if (epntsiz < 0 || (size_t)epntsiz >= sizeof(endpoint)) {
     ctx.err = NDT7_ERR_SNPRINTF;
     return ctx;
   }
-  if (BIO_set_conn_hostname(ctx.conn, endpoint) != 1) {
+  if (NDT7_TESTABLE(BIO_set_conn_hostname)(ctx.conn, endpoint) != 1) {
     ctx.err = NDT7_ERR_BIO_SET_CONN_HOSTNAME;
     return ctx;
   }
-  if (BIO_do_connect(ctx.conn) != 1) {
+  if (NDT7_TESTABLE(BIO_do_connect)(ctx.conn) != 1) {
     ctx.err = NDT7_ERR_BIO_DO_CONNECT;
     NDT7_CB_TLS_ERROR("BIO_do_connect");
     return ctx;
   }
-  if (BIO_do_handshake(ctx.conn) != 1) {
+  if (NDT7_TESTABLE(BIO_do_handshake)(ctx.conn) != 1) {
     ctx.err = NDT7_ERR_BIO_DO_HANDSHAKE;
     NDT7_CB_TLS_ERROR("BIO_do_handshake");
     return ctx;
@@ -302,7 +307,7 @@ static int ndt7_bio_writeall_(BIO *conn, const void *buf, int count) {
     if ((uintptr_t)buf > UINTPTR_MAX - (uintptr_t)off) {
       return NDT7_ERR_OVERFLOW;
     }
-    int ret = BIO_write(conn, buf + (size_t)off, count - off);
+    int ret = NDT7_TESTABLE(BIO_write)(conn, buf + (size_t)off, count - off);
     if (ret < 0) {
       NDT7_CB_TLS_ERROR("BIO_write");
       return NDT7_ERR_BIO_WRITE;
@@ -323,7 +328,7 @@ static int ndt7_bio_readall_(BIO *conn, void *buf, int count) {
     if ((uintptr_t)buf > UINTPTR_MAX - (uintptr_t)off) {
       return NDT7_ERR_OVERFLOW;
     }
-    int ret = BIO_read(conn, buf + (size_t)off, count - off);
+    int ret = NDT7_TESTABLE(BIO_read)(conn, buf + (size_t)off, count - off);
     if (ret < 0) {
       NDT7_CB_TLS_ERROR("BIO_read");
       return NDT7_ERR_BIO_READ;
@@ -344,7 +349,7 @@ static int ndt7_bio_readline_(BIO *conn, char *buf, int count) {
     if ((uintptr_t)buf > UINTPTR_MAX - (uintptr_t)off) {
       return NDT7_ERR_OVERFLOW;
     }
-    int ret = BIO_read(conn, buf + (size_t)off, 1);
+    int ret = NDT7_TESTABLE(BIO_read)(conn, buf + (size_t)off, 1);
     if (ret != 1) {
       NDT7_CB_TLS_ERROR("BIO_read");
       return NDT7_ERR_BIO_READ;
@@ -372,28 +377,29 @@ ndt7_start_(BIO *conn, const char *hostname, const char *subtest) {
   }
   char buf[2048];
   /* TODO(bassosimone): here we should generate a random Sec-WebSocket-Key */
-  int bufsiz = snprintf(buf, sizeof(buf),
-                        "GET /ndt/v7/%s HTTP/1.1\r\n"
-                        "Host: %s\r\n"
-                        "Connection: Upgrade\r\n"
-                        "Sec-WebSocket-Key: DOdm+5/Cm3WwvhfcAlhJoQ==\r\n"
-                        "Sec-WebSocket-Version: 13\r\n"
-                        "Sec-WebSocket-Protocol: net.measurementlab.ndt.v7\r\n"
-                        "Upgrade: websocket\r\n"
-                        "\r\n", subtest, hostname);
+  int bufsiz = NDT7_TESTABLE(snprintf)(
+      buf, sizeof(buf),
+      "GET /ndt/v7/%s HTTP/1.1\r\n"
+      "Host: %s\r\n"
+      "Connection: Upgrade\r\n"
+      "Sec-WebSocket-Key: DOdm+5/Cm3WwvhfcAlhJoQ==\r\n"
+      "Sec-WebSocket-Version: 13\r\n"
+      "Sec-WebSocket-Protocol: net.measurementlab.ndt.v7\r\n"
+      "Upgrade: websocket\r\n"
+      "\r\n", subtest, hostname);
   if (bufsiz < 0 || (size_t)bufsiz >= sizeof(buf)) {
     return NDT7_ERR_SNPRINTF;
   }
   NDT7_CB_HTTP_REQUEST(buf);
-  int ret = ndt7_bio_writeall_(conn, buf, bufsiz);
+  int ret = NDT7_TESTABLE(ndt7_bio_writeall_)(conn, buf, bufsiz);
   if (ret != 0) {
     return ret;
   }
-  ret = ndt7_bio_readline_(conn, buf, sizeof(buf));
+  ret = NDT7_TESTABLE(ndt7_bio_readline_)(conn, buf, sizeof(buf));
   if (ret != 0) {
     return ret;
   }
-  if (strcasecmp(buf, "HTTP/1.1 101 Switching Protocols") != 0) {
+  if (NDT7_TESTABLE(strcasecmp)(buf, "HTTP/1.1 101 Switching Protocols") != 0) {
     return NDT7_ERR_HTTP_UNHANDLED_RESPONSE_LINE;
   }
   int sec_websocket_protocol = 0;
@@ -401,25 +407,25 @@ ndt7_start_(BIO *conn, const char *hostname, const char *subtest) {
   int upgrade = 0;
   int connection = 0;
   for (int i = 0; i < 64; ++i) {
-    ret = ndt7_bio_readline_(conn, buf, sizeof(buf));
+    ret = NDT7_TESTABLE(ndt7_bio_readline_)(conn, buf, sizeof(buf));
     if (ret != 0) {
       return ret;
     }
-    if (strcasecmp(
+    if (NDT7_TESTABLE(strcasecmp)(
           buf, "Sec-WebSocket-Protocol: net.measurementlab.ndt.v7") == 0) {
       sec_websocket_protocol = 1;
       continue;
     }
-    if (strcasecmp(
+    if (NDT7_TESTABLE(strcasecmp)(
           buf, "Sec-WebSocket-Accept: Nhz+x95YebD6Uvd4nqPC2fomoUQ=") == 0) {
       sec_websocket_accept = 1;
       continue;
     }
-    if (strcasecmp(buf, "Upgrade: websocket") == 0) {
+    if (NDT7_TESTABLE(strcasecmp)(buf, "Upgrade: websocket") == 0) {
       upgrade = 1;
       continue;
     }
-    if (strcasecmp(buf, "Connection: Upgrade") == 0) {
+    if (NDT7_TESTABLE(strcasecmp)(buf, "Connection: Upgrade") == 0) {
       connection = 1;
       continue;
     }
@@ -463,7 +469,7 @@ static int ndt7_ws_recv_frame_(BIO *conn) {
   size_t length = 0;
   {
     unsigned char buf[2];
-    int ret = ndt7_bio_readall_(conn, buf, sizeof(buf));
+    int ret = NDT7_TESTABLE(ndt7_bio_readall_)(conn, buf, sizeof(buf));
     if (ret != 0) {
       return ret;
     }
@@ -502,14 +508,14 @@ static int ndt7_ws_recv_frame_(BIO *conn) {
   assert(length <= 127);
   if (length == 126) {
     unsigned char buf[2];
-    int ret = ndt7_bio_readall_(conn, buf, sizeof(buf));
+    int ret = NDT7_TESTABLE(ndt7_bio_readall_)(conn, buf, sizeof(buf));
     if (ret != 0) {
       return ret;
     }
     length = ((size_t)buf[0] << 8) + buf[1];
   } else if (length == 127) {
     unsigned char buf[8];
-    int ret = ndt7_bio_readall_(conn, buf, sizeof(buf));
+    int ret = NDT7_TESTABLE(ndt7_bio_readall_)(conn, buf, sizeof(buf));
     if (ret != 0) {
       return ret;
     }
@@ -539,7 +545,7 @@ static int ndt7_ws_recv_frame_(BIO *conn) {
     if (maxread > INT_MAX) {
       return NDT7_ERR_OVERFLOW; /* Cannot happen because scratch is small. */
     }
-    int ret = ndt7_bio_readall_(conn, scratch, (int)maxread);
+    int ret = NDT7_TESTABLE(ndt7_bio_readall_)(conn, scratch, (int)maxread);
     if (ret != 0) {
       return ret;
     }
@@ -577,17 +583,18 @@ int ndt7_download(const struct ndt7_settings *settings) {
   if (settings == NULL) {
     return NDT7_ERR_INVALID_ARGUMENT;
   }
-  struct ndt7_context ctx = ndt7_connect_(settings);
+  struct ndt7_context ctx = NDT7_TESTABLE(ndt7_connect_)(settings);
   if (ctx.err != 0) {
     BIO_free_all(ctx.conn);
     return ctx.err;
   }
-  ctx.err = ndt7_start_(ctx.conn, settings->hostname, "download");
+  ctx.err = NDT7_TESTABLE(ndt7_start_)(
+      ctx.conn, settings->hostname, "download");
   if (ctx.err != 0) {
     BIO_free_all(ctx.conn);
     return ctx.err;
   }
-  while ((ctx.err = ndt7_ws_recv_frame_(ctx.conn)) == 0) {
+  while ((ctx.err = NDT7_TESTABLE(ndt7_ws_recv_frame_)(ctx.conn)) == 0) {
     /* Nothing */
   }
   BIO_free_all(ctx.conn);
@@ -642,18 +649,19 @@ int ndt7_upload(const struct ndt7_settings *settings) {
   if (settings == NULL) {
     return NDT7_ERR_INVALID_ARGUMENT;
   }
-  struct ndt7_context ctx = ndt7_connect_(settings);
+  struct ndt7_context ctx = NDT7_TESTABLE(ndt7_connect_)(settings);
   if (ctx.err != 0) {
     BIO_free_all(ctx.conn);
     return ctx.err;
   }
-  ctx.err = ndt7_start_(ctx.conn, settings->hostname, "upload");
+  ctx.err = NDT7_TESTABLE(ndt7_start_)(ctx.conn, settings->hostname, "upload");
   if (ctx.err != 0) {
     BIO_free_all(ctx.conn);
     return ctx.err;
   }
   unsigned char frame[NDT7_WS_PREPARED_FRAME_SIZE];
-  if ((ctx.err = ndt7_ws_prepare_frame_(frame, sizeof(frame))) != 0) {
+  if ((ctx.err = NDT7_TESTABLE(ndt7_ws_prepare_frame_)(
+          frame, sizeof(frame))) != 0) {
     BIO_free_all(ctx.conn);
     return ctx.err;
   }
@@ -662,7 +670,8 @@ int ndt7_upload(const struct ndt7_settings *settings) {
   (void)gettimeofday(&begin, NULL);
   struct timeval prev = begin;
   size_t totalbytes = 0;
-  while ((ctx.err = ndt7_bio_writeall_(ctx.conn, frame, sizeof(frame))) == 0) {
+  while ((ctx.err = NDT7_TESTABLE(ndt7_bio_writeall_)(
+          ctx.conn, frame, sizeof(frame))) == 0) {
     if (totalbytes > SIZE_MAX - sizeof(frame)) {
       BIO_free_all(ctx.conn);
       return NDT7_ERR_OVERFLOW;
