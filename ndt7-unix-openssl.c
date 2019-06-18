@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <curl/curl.h>
 
 #include <openssl/err.h>
 
@@ -11,6 +12,7 @@
  * Macros that modify libndt-unix-openssl.h behaviour.
  */
 
+#ifdef NDT7_PRINT_HEADER
 /* This is the callback called when we're about to send the HTTP request
  * for upgrading the connection to WebSocket. */
 #define NDT7_CB_HTTP_REQUEST(s) (void)fprintf(stderr, "%s", s)
@@ -18,7 +20,7 @@
 /* This is the callback called when we receive an HTTP header from the
  * server when we're upgrading to WebSocket. */
 #define NDT7_CB_HTTP_RESPONSE_HEADER(s) (void)fprintf(stderr, "%s\n", s)
-
+#endif
 /* This is the callback called when we receive a measurement from the
  * server. We currently only receive download measurements. Because the
  * m-lab/ndt-server server adds a newline after each serialized JSON
@@ -31,11 +33,11 @@
 
 /* This is the callback called when we have an application level measurement
  * during the upload. We emit a JSON on the standard output. */
-#define NDT7_CB_NDT7_ON_APP_INFO_UPLOAD(elapsed, total)                        \
-  do {                                                                         \
-    fprintf(stdout, "{\"elapsed\": %f, \"app_info\": {\"num_bytes\": %zu}}\n", \
-            (double)elapsed / 1000.0, total);                                  \
-    fflush(stdout);                                                            \
+#define NDT7_CB_NDT7_ON_APP_INFO_UPLOAD(elapsed, total)                                                                                         \
+  do {                                                                                                                                          \
+    double elapsed_sec = (double)elapsed / 1000.0;                                                                                              \
+    fprintf(stdout, "{\"Upload speed:\": %f, \"elapsed\": %f, \"app_info\": {\"num_bytes\": %zu}}\n", total / elapsed_sec, elapsed_sec, total); \
+    fflush(stdout);                                                                                                                             \
   } while (0)
 
 /* This is the callback called when an OpenSSL function fails. */
@@ -105,8 +107,26 @@ int main(int argc, char **argv) {
     }
   }
   if (hostname == NULL) {
-    usage(stderr);
-    /* NOTREACHED */
+    CURL *curl;
+    CURLcode res;
+    curl = curl_easy_init();
+    if (curl) {
+      struct string_result s;
+      init_string(&s);
+      curl_easy_setopt(curl, CURLOPT_URL, "https://locate-dot-mlab-staging.appspot.com/ndt_ssl?policy=geo_options");
+      curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writefunc);
+      curl_easy_setopt(curl, CURLOPT_WRITEDATA, &s);
+      res = curl_easy_perform(curl);
+      char *ret;
+      ret = extractFqdn(s.ptr, "\"fqdn\":");
+      ret[strlen(ret) - 2] = 0;
+      memmove(ret, ret + 1, strlen(ret));
+      hostname = ret;
+      //free(s.ptr);
+
+      /* always cleanup */
+      curl_easy_cleanup(curl);
+    }
   }
   (void)alarm(timeout);
   (void)signal(SIGPIPE, SIG_IGN);

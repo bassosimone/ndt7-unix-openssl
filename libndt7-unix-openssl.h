@@ -188,6 +188,11 @@ struct ndt7_settings {
   const char *ca_bundle_path; /**< Is the CA bundle path. */
 };
 
+struct string_result {
+  char *ptr;
+  size_t len;
+};
+
 /** Runs the download subtest with the specified settings. Returns zero
  * on success, one of the NDT7_ERR_XXX error codes on failure. We don't
  * return any error after we successfully connect. */
@@ -196,12 +201,18 @@ int ndt7_download(const struct ndt7_settings *settings);
 /** Like ndt7_download, but for the upload subtest. */
 int ndt7_upload(const struct ndt7_settings *settings);
 
+void init_string(struct string_result *s);
+
+size_t writefunc(void *ptr, size_t size, size_t nmemb, struct string_result *s);
+
+static char * extractFqdn(char str[], char tag[]);
 /*
  * Implementation.
  *
  * Set this define if you don't want to inline the implementation.
  */
 #ifndef NDT7_NO_INLINE_IMPL
+
 
 #include <sys/time.h>
 
@@ -211,7 +222,6 @@ int ndt7_upload(const struct ndt7_settings *settings);
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
-
 #include <openssl/bio.h>
 #include <openssl/ssl.h>
 #include <openssl/x509.h>
@@ -241,6 +251,7 @@ ndt7_connect_(const struct ndt7_settings *settings) {
     ctx.err = NDT7_ERR_SSL_CTX_NEW;
     return ctx;
   }
+
 #ifndef NDT7_INSECURE
   if (NDT7_TESTABLE(SSL_CTX_load_verify_locations)(
         sslctx, settings->ca_bundle_path, NULL) != 1) {
@@ -690,6 +701,49 @@ int ndt7_upload(const struct ndt7_settings *settings) {
   }
   BIO_free_all(ctx.conn);
   return 0;
+}
+
+void init_string(struct string_result *s) {
+  s->len = 0;
+  s->ptr = malloc(s->len+1);
+  if (s->ptr == NULL) {
+    fprintf(stderr, "malloc() failed\n");
+    exit(EXIT_FAILURE);
+  }
+  s->ptr[0] = '\0';
+}
+
+size_t writefunc(void *ptr, size_t size, size_t nmemb, struct string_result *s)
+{
+  size_t new_len = s->len + size*nmemb;
+  s->ptr = realloc(s->ptr, new_len+1);
+  if (s->ptr == NULL) {
+    fprintf(stderr, "realloc() failed\n");
+    exit(EXIT_FAILURE);
+  }
+  memcpy(s->ptr+s->len, ptr, size*nmemb);
+  s->ptr[new_len] = '\0';
+  s->len = new_len;
+
+  return size*nmemb;
+}
+
+static char * extractFqdn(char str[], char tag[]) {
+	char delim[] = " ";
+	int found = 0;
+	char *ptr = strtok(str, delim);
+
+	while(ptr != NULL) {
+		if (found == 1) {
+			return ptr;
+		}
+		if (strncmp(ptr, tag, strlen(tag)) == 0) {
+			found=1;
+		}
+		ptr = strtok(NULL, delim);
+	}
+  exit(1);
+  /* NOTREACHED */
 }
 
 #endif /* NDT7_NO_INLINE_IMPL */
