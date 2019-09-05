@@ -15,7 +15,7 @@
  * 3. the main() has setup an alarm() to interrupt us if we have
  *    been running for too much time.
  *
- * See the ndt7-unix-openssl.c for more insights.
+ * See the ndt7-unix-openssl.c file for more insights.
  */
 
 /*
@@ -189,7 +189,7 @@ struct ndt7_settings {
 };
 
 /** Runs the download subtest with the specified settings. Returns zero
- * on success, one of the NDT7_ERR_XXX error codes on failure. We don't
+ * on success, one of the NDT7_ERR_XXX error codes on failure. We do not
  * return any error after we successfully connect. */
 int ndt7_download(const struct ndt7_settings *settings);
 
@@ -276,6 +276,8 @@ ndt7_connect_(const struct ndt7_settings *settings) {
   SSL_set_verify(ssl, SSL_VERIFY_PEER, NULL);
 #endif
   char endpoint[128];
+  /* TODO(bassosimone): we should document that the following may fail
+     if the user has provided us with an IPv6 address. */
   int epntsiz = NDT7_TESTABLE(snprintf)(endpoint, sizeof(endpoint), "%s:%s",
                                         settings->hostname, settings->port);
   if (epntsiz < 0 || (size_t)epntsiz >= sizeof(endpoint)) {
@@ -377,6 +379,7 @@ ndt7_start_(BIO *conn, const char *hostname, const char *subtest) {
   }
   char buf[2048];
   /* TODO(bassosimone): here we should generate a random Sec-WebSocket-Key */
+  /* TODO(bassosimone): here we should set the User-Agent. */
   int bufsiz = NDT7_TESTABLE(snprintf)(
       buf, sizeof(buf),
       "GET /ndt/v7/%s HTTP/1.1\r\n"
@@ -399,6 +402,7 @@ ndt7_start_(BIO *conn, const char *hostname, const char *subtest) {
   if (ret != 0) {
     return ret;
   }
+  /* TODO(bassosimone): we should ignore the reason. */
   if (NDT7_TESTABLE(strcasecmp)(buf, "HTTP/1.1 101 Switching Protocols") != 0) {
     return NDT7_ERR_HTTP_UNHANDLED_RESPONSE_LINE;
   }
@@ -536,6 +540,8 @@ static int ndt7_ws_recv_frame_(BIO *conn) {
   /*
    * Now read the payload of the message.
    */
+  /* TODO(bassosimone): consider storing this buffer into the context
+     so we avoid consuming stack space here. */
   char scratch[1 << 17];
   if (opcode == NDT7_WS_OPCODE_TEXT) {
     NDT7_CB_NDT7_BEGIN_READ_MEASUREMENT();
@@ -594,11 +600,12 @@ int ndt7_download(const struct ndt7_settings *settings) {
     BIO_free_all(ctx.conn);
     return ctx.err;
   }
+  /* TODO(bassosimone): measure application level speed. */
   while ((ctx.err = NDT7_TESTABLE(ndt7_ws_recv_frame_)(ctx.conn)) == 0) {
     /* Nothing */
   }
   BIO_free_all(ctx.conn);
-  return 0;
+  return 0;  /* No failure once test has started */
 }
 
 /* Constants for preparing frames. */
@@ -659,6 +666,7 @@ int ndt7_upload(const struct ndt7_settings *settings) {
     BIO_free_all(ctx.conn);
     return ctx.err;
   }
+  /* TODO(bassosimone): we don't want the frame on the stack. */
   unsigned char frame[NDT7_WS_PREPARED_FRAME_SIZE];
   if ((ctx.err = NDT7_TESTABLE(ndt7_ws_prepare_frame_)(
           frame, sizeof(frame))) != 0) {
@@ -689,7 +697,7 @@ int ndt7_upload(const struct ndt7_settings *settings) {
     }
   }
   BIO_free_all(ctx.conn);
-  return 0;
+  return 0;  /* No failure once test has started */
 }
 
 #endif /* NDT7_NO_INLINE_IMPL */
