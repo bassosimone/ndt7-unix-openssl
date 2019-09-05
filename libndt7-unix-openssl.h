@@ -3,7 +3,9 @@
 #ifndef LIBNDT7_UNIX_OPENSSL_H
 #define LIBNDT7_UNIX_OPENSSL_H
 
-/*
+/**
+ * @file libndt7-unix-openssl.h
+ *
  * This is a very simple implementation of ndt7 that assumes you are
  * on a Unix like system and are using OpenSSL 1.0.2+. The code in here
  * assumes that the following conditions are met:
@@ -14,6 +16,8 @@
  *
  * 3. the main() has setup an alarm() to interrupt us if we have
  *    been running for too much time.
+ *
+ * You can set `-D NDT7_INSECURE` to disable TLS certs verification.
  *
  * See the ndt7-unix-openssl.c file for more insights.
  */
