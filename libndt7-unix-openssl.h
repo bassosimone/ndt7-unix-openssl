@@ -25,6 +25,9 @@
  * occurring during ndt7 subtests (e.g. a speed measurement). Each undefined
  * macro will be defined by libndt7-unix-openssl.h to do nothing.
  *
+ * Including this header also includes the implementation inline unless
+ * you set `-D NDT7_NO_INLINE_IMPL`.
+ *
  * See the ndt7-unix-openssl.c file for more insights.
  */
 
