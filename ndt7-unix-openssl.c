@@ -117,6 +117,7 @@ int main(int argc, char **argv) {
   settings.hostname = hostname;
   settings.port = port;
   settings.ca_bundle_path = ca_bundle_path;
+  settings.ua = "ndt7-unix-openssl/0.0.1";
   int exitcode = 0;
   int ret = ndt7_download(&settings);
   if (ret != 0) {

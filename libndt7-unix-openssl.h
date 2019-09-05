@@ -202,6 +202,7 @@ struct ndt7_settings {
   const char *hostname;       /**< Is the hostname to use. */
   const char *port;           /**< Is the port to use. */
   const char *ca_bundle_path; /**< Is the CA bundle path. */
+  const char *ua;             /**< Is the User-Agent. */
 };
 
 /** Runs the download subtest with the specified settings. @return zero
@@ -392,13 +393,12 @@ static int ndt7_bio_readline_(BIO *conn, char *buf, int count) {
 
 static int
 ndt7_start_(BIO *conn, const char *hostname, const char *subtest,
-            char *base, const size_t count) {
-  if (conn == NULL || hostname == NULL || subtest == NULL ||
+            const char *ua, char *base, const size_t count) {
+  if (conn == NULL || hostname == NULL || subtest == NULL || ua == NULL ||
       base == NULL || count <= 0 || count > INT_MAX) {
     return NDT7_ERR_INVALID_ARGUMENT;
   }
   /* TODO(bassosimone): here we should generate a random Sec-WebSocket-Key */
-  /* TODO(bassosimone): here we should set the User-Agent. */
   int bufsiz = NDT7_TESTABLE(snprintf)(
       base, count,
       "GET /ndt/v7/%s HTTP/1.1\r\n"
@@ -408,7 +408,8 @@ ndt7_start_(BIO *conn, const char *hostname, const char *subtest,
       "Sec-WebSocket-Version: 13\r\n"
       "Sec-WebSocket-Protocol: net.measurementlab.ndt.v7\r\n"
       "Upgrade: websocket\r\n"
-      "\r\n", subtest, hostname);
+      "User-Agent: %s\r\n"
+      "\r\n", subtest, hostname, ua);
   if (bufsiz < 0 || (size_t)bufsiz >= count) {
     return NDT7_ERR_SNPRINTF;
   }
@@ -643,7 +644,7 @@ static int ndt7_download_with_buffer_(
     return ctx.err;
   }
   ctx.err = NDT7_TESTABLE(ndt7_start_)(
-      ctx.conn, settings->hostname, "download", base, count);
+      ctx.conn, settings->hostname, "download", settings->ua, base, count);
   if (ctx.err != 0) {
     BIO_free_all(ctx.conn);
     return ctx.err;
@@ -743,7 +744,7 @@ static int ndt7_upload_with_buffer_(
     return ctx.err;
   }
   ctx.err = NDT7_TESTABLE(ndt7_start_)(
-      ctx.conn, settings->hostname, "upload", base, count);
+      ctx.conn, settings->hostname, "upload", settings->ua, base, count);
   if (ctx.err != 0) {
     BIO_free_all(ctx.conn);
     return ctx.err;
