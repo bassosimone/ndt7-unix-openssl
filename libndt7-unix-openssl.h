@@ -190,6 +190,9 @@
 /** X509_VERIFY_PARAM_set1_host failed. */
 #define NDT7_ERR_X509_VERIFY_PARAM_SET1_HOST 29
 
+/** malloc failed. */
+#define NDT7_ERR_MALLOC 30
+
 /*
  * API
  */
@@ -386,15 +389,16 @@ static int ndt7_bio_readline_(BIO *conn, char *buf, int count) {
 }
 
 static int
-ndt7_start_(BIO *conn, const char *hostname, const char *subtest) {
-  if (conn == NULL || hostname == NULL || subtest == NULL) {
+ndt7_start_(BIO *conn, const char *hostname, const char *subtest,
+            char *base, const size_t count) {
+  if (conn == NULL || hostname == NULL || subtest == NULL ||
+      base == NULL || count <= 0 || count > INT_MAX) {
     return NDT7_ERR_INVALID_ARGUMENT;
   }
-  char buf[2048];
   /* TODO(bassosimone): here we should generate a random Sec-WebSocket-Key */
   /* TODO(bassosimone): here we should set the User-Agent. */
   int bufsiz = NDT7_TESTABLE(snprintf)(
-      buf, sizeof(buf),
+      base, count,
       "GET /ndt/v7/%s HTTP/1.1\r\n"
       "Host: %s\r\n"
       "Connection: Upgrade\r\n"
@@ -403,20 +407,20 @@ ndt7_start_(BIO *conn, const char *hostname, const char *subtest) {
       "Sec-WebSocket-Protocol: net.measurementlab.ndt.v7\r\n"
       "Upgrade: websocket\r\n"
       "\r\n", subtest, hostname);
-  if (bufsiz < 0 || (size_t)bufsiz >= sizeof(buf)) {
+  if (bufsiz < 0 || (size_t)bufsiz >= count) {
     return NDT7_ERR_SNPRINTF;
   }
-  NDT7_CB_HTTP_REQUEST(buf);
-  int ret = NDT7_TESTABLE(ndt7_bio_writeall_)(conn, buf, bufsiz);
+  NDT7_CB_HTTP_REQUEST(base);
+  int ret = NDT7_TESTABLE(ndt7_bio_writeall_)(conn, base, bufsiz);
   if (ret != 0) {
     return ret;
   }
-  ret = NDT7_TESTABLE(ndt7_bio_readline_)(conn, buf, sizeof(buf));
+  ret = NDT7_TESTABLE(ndt7_bio_readline_)(conn, base, (int)count);
   if (ret != 0) {
     return ret;
   }
   /* TODO(bassosimone): we should ignore the reason. */
-  if (NDT7_TESTABLE(strcasecmp)(buf, "HTTP/1.1 101 Switching Protocols") != 0) {
+  if (NDT7_TESTABLE(strcasecmp)(base, "HTTP/1.1 101 Switching Protocols") != 0) {
     return NDT7_ERR_HTTP_UNHANDLED_RESPONSE_LINE;
   }
   int sec_websocket_protocol = 0;
@@ -424,29 +428,29 @@ ndt7_start_(BIO *conn, const char *hostname, const char *subtest) {
   int upgrade = 0;
   int connection = 0;
   for (int i = 0; i < 64; ++i) {
-    ret = NDT7_TESTABLE(ndt7_bio_readline_)(conn, buf, sizeof(buf));
+    ret = NDT7_TESTABLE(ndt7_bio_readline_)(conn, base, (int)count);
     if (ret != 0) {
       return ret;
     }
     if (NDT7_TESTABLE(strcasecmp)(
-          buf, "Sec-WebSocket-Protocol: net.measurementlab.ndt.v7") == 0) {
+          base, "Sec-WebSocket-Protocol: net.measurementlab.ndt.v7") == 0) {
       sec_websocket_protocol = 1;
       continue;
     }
     if (NDT7_TESTABLE(strcasecmp)(
-          buf, "Sec-WebSocket-Accept: Nhz+x95YebD6Uvd4nqPC2fomoUQ=") == 0) {
+          base, "Sec-WebSocket-Accept: Nhz+x95YebD6Uvd4nqPC2fomoUQ=") == 0) {
       sec_websocket_accept = 1;
       continue;
     }
-    if (NDT7_TESTABLE(strcasecmp)(buf, "Upgrade: websocket") == 0) {
+    if (NDT7_TESTABLE(strcasecmp)(base, "Upgrade: websocket") == 0) {
       upgrade = 1;
       continue;
     }
-    if (NDT7_TESTABLE(strcasecmp)(buf, "Connection: Upgrade") == 0) {
+    if (NDT7_TESTABLE(strcasecmp)(base, "Connection: Upgrade") == 0) {
       connection = 1;
       continue;
     }
-    if (strlen(buf) == 0) {
+    if (strlen(base) == 0) {
       return (sec_websocket_protocol && sec_websocket_accept &&
               upgrade && connection) ? 0
                                      : NDT7_ERR_NDT7_MISSING_REQUIRED_HEADER;
@@ -473,6 +477,17 @@ ndt7_start_(BIO *conn, const char *hostname, const char *subtest) {
  * info see <https://tools.ietf.org/html/rfc6455#section-5.2>. */
 #define NDT7_WS_MASK_FLAG 0x80
 #define NDT7_WS_LEN_MASK 0x7f
+
+/* Maximum message size according to the spec. */
+#define NDT7_MAX_MESSAGE_SIZE (1 << 24)
+
+/* The maximum header size accounts for the opcode and flags (1),
+ * payload length (1), extra length (8), and mask (4). */
+#define NDT7_WS_MAX_HEADER_SIZE 14
+
+/* Size of the buffer that we use to recv/send WebSocket messages. This is the
+ * amount of buffering that we need when preparing a WebSocket message. */
+#define NDT7_BUFSIZ (NDT7_MAX_MESSAGE_SIZE + NDT7_WS_MAX_HEADER_SIZE)
 
 static int ndt7_ws_recv_frame_(BIO *conn) {
   if (conn == NULL) {
@@ -598,8 +613,9 @@ static int ndt7_ws_recv_frame_(BIO *conn) {
   return 0;
 }
 
-int ndt7_download(const struct ndt7_settings *settings) {
-  if (settings == NULL) {
+static int ndt7_download_with_buffer_(
+    const struct ndt7_settings *settings, char *base, const size_t count) {
+  if (settings == NULL || base == NULL || count <= 0) {
     return NDT7_ERR_INVALID_ARGUMENT;
   }
   struct ndt7_context ctx = NDT7_TESTABLE(ndt7_connect_)(settings);
@@ -608,7 +624,7 @@ int ndt7_download(const struct ndt7_settings *settings) {
     return ctx.err;
   }
   ctx.err = NDT7_TESTABLE(ndt7_start_)(
-      ctx.conn, settings->hostname, "download");
+      ctx.conn, settings->hostname, "download", base, count);
   if (ctx.err != 0) {
     BIO_free_all(ctx.conn);
     return ctx.err;
@@ -619,6 +635,19 @@ int ndt7_download(const struct ndt7_settings *settings) {
   }
   BIO_free_all(ctx.conn);
   return 0;  /* No failure once test has started */
+}
+
+int ndt7_download(const struct ndt7_settings *settings) {
+  if (settings == NULL) {
+    return NDT7_ERR_INVALID_ARGUMENT;
+  }
+  char *base = NDT7_TESTABLE(malloc)(NDT7_BUFSIZ);
+  if (base == NULL) {
+    return NDT7_ERR_MALLOC;
+  }
+  int r = NDT7_TESTABLE(ndt7_download_with_buffer_)(settings, base, NDT7_BUFSIZ);
+  free(base);
+  return r;
 }
 
 /* Constants for preparing frames. */
@@ -665,8 +694,9 @@ static long ndt7_elapsed_millisecond_(struct timeval begin, struct timeval now) 
       (long)now.tv_usec - (long)begin.tv_usec) / 1000L;
 }
 
-int ndt7_upload(const struct ndt7_settings *settings) {
-  if (settings == NULL) {
+static int ndt7_upload_with_buffer_(
+    const struct ndt7_settings *settings, char *base, const size_t count) {
+  if (settings == NULL || base == NULL || count <= 0) {
     return NDT7_ERR_INVALID_ARGUMENT;
   }
   struct ndt7_context ctx = NDT7_TESTABLE(ndt7_connect_)(settings);
@@ -674,7 +704,8 @@ int ndt7_upload(const struct ndt7_settings *settings) {
     BIO_free_all(ctx.conn);
     return ctx.err;
   }
-  ctx.err = NDT7_TESTABLE(ndt7_start_)(ctx.conn, settings->hostname, "upload");
+  ctx.err = NDT7_TESTABLE(ndt7_start_)(
+      ctx.conn, settings->hostname, "upload", base, count);
   if (ctx.err != 0) {
     BIO_free_all(ctx.conn);
     return ctx.err;
@@ -711,6 +742,19 @@ int ndt7_upload(const struct ndt7_settings *settings) {
   }
   BIO_free_all(ctx.conn);
   return 0;  /* No failure once test has started */
+}
+
+int ndt7_upload(const struct ndt7_settings *settings) {
+  if (settings == NULL) {
+    return NDT7_ERR_INVALID_ARGUMENT;
+  }
+  char *base = NDT7_TESTABLE(malloc)(NDT7_BUFSIZ);
+  if (base == NULL) {
+    return NDT7_ERR_MALLOC;
+  }
+  int r = NDT7_TESTABLE(ndt7_upload_with_buffer_)(settings, base, NDT7_BUFSIZ);
+  free(base);
+  return r;
 }
 
 #endif /* NDT7_NO_INLINE_IMPL */
