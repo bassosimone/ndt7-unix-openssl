@@ -91,6 +91,11 @@
 #define NDT7_CB_WS_OPCODE_FIN_LENGTH(opcode, fin, length)
 #endif
 
+#ifndef NDT7_CB_NDT7_ON_APP_INFO_DOWNLOAD
+/** Like NDT7_CB_NDT7_ON_APP_INFO_UPLOAD but for the download. */
+#define NDT7_CB_NDT7_ON_APP_INFO_DOWNLOAD(elapsed, total) /* Nothing */
+#endif
+
 /*
  * Error codes.
  */
@@ -512,10 +517,12 @@ static int ndt7_ws_make_bufsiz_(size_t *count) {
   return NDT7_ERR_INVALID_ARGUMENT;
 }
 
-static int ndt7_ws_recv_frame_(BIO *conn, char *base, const size_t count) {
-  if (conn == NULL || base == NULL || count <= 0) {
+static int ndt7_ws_recv_frame_(
+    BIO *conn, char *base, const size_t count, size_t *nbytes) {
+  if (conn == NULL || base == NULL || count <= 0 || nbytes == NULL) {
     return NDT7_ERR_INVALID_ARGUMENT;
   }
+  *nbytes = 0;
   /*
    * Read message header
    */
@@ -594,6 +601,7 @@ static int ndt7_ws_recv_frame_(BIO *conn, char *base, const size_t count) {
   if (opcode == NDT7_WS_OPCODE_TEXT) {
     NDT7_CB_NDT7_BEGIN_READ_MEASUREMENT();
   }
+  *nbytes = length;
   while (length > 0) {
     size_t maxread = (count < length) ? count : length;
     if (maxread > INT_MAX) {
@@ -633,6 +641,11 @@ static int ndt7_ws_recv_frame_(BIO *conn, char *base, const size_t count) {
   return 0;
 }
 
+static long ndt7_elapsed_millisecond_(struct timeval begin, struct timeval now) {
+  return ((long)now.tv_sec - (long)begin.tv_sec) * 1000L + (
+      (long)now.tv_usec - (long)begin.tv_usec) / 1000L;
+}
+
 static int ndt7_download_with_buffer_(
     const struct ndt7_settings *settings, char *base, const size_t count) {
   if (settings == NULL || base == NULL || count <= 0) {
@@ -649,10 +662,26 @@ static int ndt7_download_with_buffer_(
     BIO_free_all(ctx.conn);
     return ctx.err;
   }
-  /* TODO(bassosimone): measure application level speed. */
+  struct timeval begin;
+  /* TODO(bassosimone): gettimeofday is not monotonic. */
+  (void)gettimeofday(&begin, NULL);
+  size_t totalbytes = 0;
+  size_t n = 0;
+  struct timeval prev = begin;
   while ((ctx.err = NDT7_TESTABLE(ndt7_ws_recv_frame_)(
-      ctx.conn, base, count)) == 0) {
-    /* Nothing */
+      ctx.conn, base, count, &n)) == 0) {
+    if (totalbytes > SIZE_MAX - n) {
+      BIO_free_all(ctx.conn);
+      return NDT7_ERR_OVERFLOW;
+    }
+    totalbytes += n;
+    struct timeval now;
+    (void)gettimeofday(&now, NULL);
+    long elapsed = ndt7_elapsed_millisecond_(begin, now);
+    if (ndt7_elapsed_millisecond_(prev, now) > 250) {
+      prev = now;
+      NDT7_CB_NDT7_ON_APP_INFO_DOWNLOAD(elapsed, totalbytes);
+    }
   }
   BIO_free_all(ctx.conn);
   return 0;  /* No failure once test has started */
@@ -726,11 +755,6 @@ static int ndt7_ws_prepare_frame_(
   }
   *framesize = off;
   return 0;
-}
-
-static long ndt7_elapsed_millisecond_(struct timeval begin, struct timeval now) {
-  return ((long)now.tv_sec - (long)begin.tv_sec) * 1000L + (
-      (long)now.tv_usec - (long)begin.tv_usec) / 1000L;
 }
 
 static int ndt7_upload_with_buffer_(

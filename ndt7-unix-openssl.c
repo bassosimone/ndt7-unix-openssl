@@ -49,6 +49,9 @@
     fprintf(stderr, "=== END %s FAILURE LOG ===\n", what);                     \
   } while (0)
 
+/* This is called during the upload when we have app level info. */
+#define NDT7_CB_NDT7_ON_APP_INFO_DOWNLOAD NDT7_CB_NDT7_ON_APP_INFO_UPLOAD
+
 #include "libndt7-unix-openssl.h"
 
 /* If you provide this macro at compile time, you can override the default
