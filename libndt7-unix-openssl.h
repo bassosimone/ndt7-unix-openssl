@@ -653,10 +653,13 @@ int ndt7_download(const struct ndt7_settings *settings) {
 #define NDT7_WS_MASK_SIZE 4
 
 /* TODO(bassosimone): allow for frames larger than 1<<16. */
-static int ndt7_ws_prepare_frame_(unsigned char *frame, size_t count) {
-  if (count != NDT7_WS_PREPARED_FRAME_SIZE) {
+static int ndt7_ws_prepare_frame_(
+    unsigned char *frame, size_t count, size_t *realsize) {
+  if (frame == NULL || count < NDT7_WS_PREPARED_FRAME_SIZE ||
+      realsize == NULL) {
     return NDT7_ERR_INVALID_ARGUMENT;
   }
+  count = NDT7_WS_PREPARED_FRAME_SIZE;  /* Clamp count to expected size */
   /* TODO(bassosimone): the mask should be random. */
   const unsigned char mask[NDT7_WS_MASK_SIZE] = {7, 1, 1, 7};
   size_t off = 0;
@@ -684,6 +687,7 @@ static int ndt7_ws_prepare_frame_(unsigned char *frame, size_t count) {
     /* TODO(bassosimone): the body should be random. */
     frame[off] = (unsigned char)('A' ^ mask[i % NDT7_WS_MASK_SIZE]);
   }
+  *realsize = off;
   return 0;
 }
 
@@ -708,12 +712,15 @@ static int ndt7_upload_with_buffer_(
     BIO_free_all(ctx.conn);
     return ctx.err;
   }
-  /* TODO(bassosimone): we don't want the frame on the stack. */
-  unsigned char frame[NDT7_WS_PREPARED_FRAME_SIZE];
+  size_t framesize = 0;
   if ((ctx.err = NDT7_TESTABLE(ndt7_ws_prepare_frame_)(
-          frame, sizeof(frame))) != 0) {
+          (unsigned char *)base, count, &framesize)) != 0) {
     BIO_free_all(ctx.conn);
     return ctx.err;
+  }
+  if (framesize > INT_MAX) {
+    BIO_free_all(ctx.conn);
+    return NDT7_ERR_OVERFLOW;
   }
   struct timeval begin;
   /* TODO(bassosimone): gettimeofday is not monotonic. */
@@ -721,12 +728,12 @@ static int ndt7_upload_with_buffer_(
   struct timeval prev = begin;
   size_t totalbytes = 0;
   while ((ctx.err = NDT7_TESTABLE(ndt7_bio_writeall_)(
-          ctx.conn, frame, sizeof(frame))) == 0) {
-    if (totalbytes > SIZE_MAX - sizeof(frame)) {
+          ctx.conn, base, (int)framesize)) == 0) {
+    if (totalbytes > SIZE_MAX - framesize) {
       BIO_free_all(ctx.conn);
       return NDT7_ERR_OVERFLOW;
     }
-    totalbytes += sizeof(frame);
+    totalbytes += framesize;
     struct timeval now;
     (void)gettimeofday(&now, NULL);
     long elapsed = ndt7_elapsed_millisecond_(begin, now);
