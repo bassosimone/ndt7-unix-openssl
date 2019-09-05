@@ -489,8 +489,8 @@ ndt7_start_(BIO *conn, const char *hostname, const char *subtest,
  * amount of buffering that we need when preparing a WebSocket message. */
 #define NDT7_BUFSIZ (NDT7_MAX_MESSAGE_SIZE + NDT7_WS_MAX_HEADER_SIZE)
 
-static int ndt7_ws_recv_frame_(BIO *conn) {
-  if (conn == NULL) {
+static int ndt7_ws_recv_frame_(BIO *conn, char *base, const size_t count) {
+  if (conn == NULL || base == NULL || count <= 0) {
     return NDT7_ERR_INVALID_ARGUMENT;
   }
   /*
@@ -568,23 +568,20 @@ static int ndt7_ws_recv_frame_(BIO *conn) {
   /*
    * Now read the payload of the message.
    */
-  /* TODO(bassosimone): consider storing this buffer into the context
-     so we avoid consuming stack space here. */
-  char scratch[1 << 17];
   if (opcode == NDT7_WS_OPCODE_TEXT) {
     NDT7_CB_NDT7_BEGIN_READ_MEASUREMENT();
   }
   while (length > 0) {
-    size_t maxread = (sizeof(scratch) < length) ? sizeof(scratch) : length;
+    size_t maxread = (count < length) ? count : length;
     if (maxread > INT_MAX) {
       return NDT7_ERR_OVERFLOW; /* Cannot happen because scratch is small. */
     }
-    int ret = NDT7_TESTABLE(ndt7_bio_readall_)(conn, scratch, (int)maxread);
+    int ret = NDT7_TESTABLE(ndt7_bio_readall_)(conn, base, (int)maxread);
     if (ret != 0) {
       return ret;
     }
     if (opcode == NDT7_WS_OPCODE_TEXT) {
-      NDT7_CB_NDT7_ON_MEASUREMENT_PART(scratch, maxread);
+      NDT7_CB_NDT7_ON_MEASUREMENT_PART(base, maxread);
     }
     assert(length >= maxread);
     length -= maxread;
@@ -630,7 +627,8 @@ static int ndt7_download_with_buffer_(
     return ctx.err;
   }
   /* TODO(bassosimone): measure application level speed. */
-  while ((ctx.err = NDT7_TESTABLE(ndt7_ws_recv_frame_)(ctx.conn)) == 0) {
+  while ((ctx.err = NDT7_TESTABLE(ndt7_ws_recv_frame_)(
+      ctx.conn, base, count)) == 0) {
     /* Nothing */
   }
   BIO_free_all(ctx.conn);
