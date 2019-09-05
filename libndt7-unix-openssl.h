@@ -481,13 +481,33 @@ ndt7_start_(BIO *conn, const char *hostname, const char *subtest,
 /* Maximum message size according to the spec. */
 #define NDT7_MAX_MESSAGE_SIZE (1 << 24)
 
+/* Size of the mask part of the header */
+#define NDT7_WS_MASK_SIZE 4
+
+/* The minimum header size accounts for the opcode and flags (1),
+ * payload length (1), and mask (4). */
+#define NDT7_WS_MIN_HEADER_SIZE 6
+
 /* The maximum header size accounts for the opcode and flags (1),
  * payload length (1), extra length (8), and mask (4). */
 #define NDT7_WS_MAX_HEADER_SIZE 14
 
-/* Size of the buffer that we use to recv/send WebSocket messages. This is the
- * amount of buffering that we need when preparing a WebSocket message. */
-#define NDT7_BUFSIZ (NDT7_MAX_MESSAGE_SIZE + NDT7_WS_MAX_HEADER_SIZE)
+/* Computes the size of a WebSocket frame holding count payload bytes */
+static int ndt7_ws_make_bufsiz_(size_t *count) {
+  if (*count < 126) {
+    *count += NDT7_WS_MIN_HEADER_SIZE;
+    return 0;
+  }
+  if (*count <= UINT16_MAX) {
+    *count += NDT7_WS_MIN_HEADER_SIZE + 2;
+    return 0;
+  }
+  if (*count <= SIZE_MAX - NDT7_WS_MAX_HEADER_SIZE) {
+    *count += NDT7_WS_MAX_HEADER_SIZE;
+    return 0;
+  }
+  return NDT7_ERR_INVALID_ARGUMENT;
+}
 
 static int ndt7_ws_recv_frame_(BIO *conn, char *base, const size_t count) {
   if (conn == NULL || base == NULL || count <= 0) {
@@ -639,40 +659,54 @@ int ndt7_download(const struct ndt7_settings *settings) {
   if (settings == NULL) {
     return NDT7_ERR_INVALID_ARGUMENT;
   }
-  char *base = NDT7_TESTABLE(malloc)(NDT7_BUFSIZ);
+  size_t siz = NDT7_MAX_MESSAGE_SIZE;
+  int err = NDT7_TESTABLE(ndt7_ws_make_bufsiz_)(&siz);
+  if (err != 0) {
+    return err;
+  }
+  char *base = NDT7_TESTABLE(malloc)(siz);
   if (base == NULL) {
     return NDT7_ERR_MALLOC;
   }
-  int r = NDT7_TESTABLE(ndt7_download_with_buffer_)(settings, base, NDT7_BUFSIZ);
+  int r = NDT7_TESTABLE(ndt7_download_with_buffer_)(settings, base, siz);
   free(base);
   return r;
 }
 
-/* Constants for preparing frames. */
-#define NDT7_WS_PREPARED_FRAME_SIZE 1 << 13
-#define NDT7_WS_MASK_SIZE 4
-
-/* TODO(bassosimone): allow for frames larger than 1<<16. */
 static int ndt7_ws_prepare_frame_(
-    unsigned char *frame, size_t count, size_t *realsize) {
-  if (frame == NULL || count < NDT7_WS_PREPARED_FRAME_SIZE ||
-      realsize == NULL) {
+    unsigned char *frame, size_t count, size_t desired, size_t *framesize) {
+  /* Like we did for download, limit maximum message size to 1<<32. */
+  if (frame == NULL || desired > UINT32_MAX || framesize == NULL) {
     return NDT7_ERR_INVALID_ARGUMENT;
   }
-  count = NDT7_WS_PREPARED_FRAME_SIZE;  /* Clamp count to expected size */
+  size_t required = desired;
+  if (ndt7_ws_make_bufsiz_(&required) != 0 || required > count) {
+    return NDT7_ERR_INVALID_ARGUMENT;
+  }
   /* TODO(bassosimone): the mask should be random. */
   const unsigned char mask[NDT7_WS_MASK_SIZE] = {7, 1, 1, 7};
   size_t off = 0;
   /*
-   * Header
+   * Header and length.
    */
   frame[off++] = (unsigned char)(NDT7_WS_OPCODE_BINARY | NDT7_WS_FIN_FLAG);
-  frame[off++] = (unsigned char)((126 & NDT7_WS_LEN_MASK) | NDT7_WS_MASK_FLAG);
-  /*
-   * 16-bit length. We need to subtract the 8 byte header.
-   */
-  frame[off++] = (unsigned char)(((count - 8) >> 8) & 0xff);
-  frame[off++] = (unsigned char)((count - 8) & 0xff);
+  if (desired < 126) {
+    frame[off++] = (unsigned char)((desired & NDT7_WS_LEN_MASK) | NDT7_WS_MASK_FLAG);
+  } else if (desired <= UINT16_MAX) {
+    frame[off++] = (unsigned char)((126 & NDT7_WS_LEN_MASK) | NDT7_WS_MASK_FLAG);
+    frame[off++] = (unsigned char)((desired >> 8) & 0xff);
+    frame[off++] = (unsigned char)((desired) & 0xff);
+  } else {
+    frame[off++] = (unsigned char)((127 & NDT7_WS_LEN_MASK) | NDT7_WS_MASK_FLAG);
+    frame[off++] = (unsigned char)((desired >> 56) & 0xff);
+    frame[off++] = (unsigned char)((desired >> 48) & 0xff);
+    frame[off++] = (unsigned char)((desired >> 40) & 0xff);
+    frame[off++] = (unsigned char)((desired >> 32) & 0xff);
+    frame[off++] = (unsigned char)((desired >> 24) & 0xff);
+    frame[off++] = (unsigned char)((desired >> 16) & 0xff);
+    frame[off++] = (unsigned char)((desired >> 8) & 0xff);
+    frame[off++] = (unsigned char)((desired) & 0xff);
+  }
   /*
    * Mask
    */
@@ -683,11 +717,11 @@ static int ndt7_ws_prepare_frame_(
   /*
    * Body
    */
-  for (size_t i = 0; off < count; off++, i++) {
+  for (size_t i = 0; off < required; off++, i++) {
     /* TODO(bassosimone): the body should be random. */
     frame[off] = (unsigned char)('A' ^ mask[i % NDT7_WS_MASK_SIZE]);
   }
-  *realsize = off;
+  *framesize = off;
   return 0;
 }
 
@@ -712,9 +746,10 @@ static int ndt7_upload_with_buffer_(
     BIO_free_all(ctx.conn);
     return ctx.err;
   }
+  const size_t payloadsiz = 1 << 13;
   size_t framesize = 0;
   if ((ctx.err = NDT7_TESTABLE(ndt7_ws_prepare_frame_)(
-          (unsigned char *)base, count, &framesize)) != 0) {
+          (unsigned char *)base, count, payloadsiz, &framesize)) != 0) {
     BIO_free_all(ctx.conn);
     return ctx.err;
   }
@@ -753,11 +788,16 @@ int ndt7_upload(const struct ndt7_settings *settings) {
   if (settings == NULL) {
     return NDT7_ERR_INVALID_ARGUMENT;
   }
-  char *base = NDT7_TESTABLE(malloc)(NDT7_BUFSIZ);
+  size_t siz = NDT7_MAX_MESSAGE_SIZE;
+  int err = NDT7_TESTABLE(ndt7_ws_make_bufsiz_)(&siz);
+  if (err != 0) {
+    return err;
+  }
+  char *base = NDT7_TESTABLE(malloc)(siz);
   if (base == NULL) {
     return NDT7_ERR_MALLOC;
   }
-  int r = NDT7_TESTABLE(ndt7_upload_with_buffer_)(settings, base, NDT7_BUFSIZ);
+  int r = NDT7_TESTABLE(ndt7_upload_with_buffer_)(settings, base, siz);
   free(base);
   return r;
 }
