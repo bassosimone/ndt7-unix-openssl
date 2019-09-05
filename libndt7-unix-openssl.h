@@ -204,9 +204,13 @@ struct ndt7_settings {
   const char *ca_bundle_path; /**< Is the CA bundle path. */
 };
 
-/** Runs the download subtest with the specified settings. Returns zero
- * on success, one of the NDT7_ERR_XXX error codes on failure. We do not
- * return any error after we successfully connect. */
+/** Runs the download subtest with the specified settings. @return zero
+ * on success, one of the NDT7_ERR_XXX error codes on failure. @note We do
+ * not return any error after we successfully connect, even if we get an
+ * I/O error during the download, because an error after the download has
+ * started should not cause it to fail. @bug This function fails with
+ * NDT7_ERR_BIO_SET_CONN_HOSTNAME when the hostname is an IPv6 address,
+ * because the address won't be properly quoted. */
 int ndt7_download(const struct ndt7_settings *settings);
 
 /** Like ndt7_download, but for the upload subtest. */
@@ -292,8 +296,6 @@ ndt7_connect_(const struct ndt7_settings *settings) {
   SSL_set_verify(ssl, SSL_VERIFY_PEER, NULL);
 #endif
   char endpoint[128];
-  /* TODO(bassosimone): we should document that the following may fail
-     if the user has provided us with an IPv6 address. */
   int epntsiz = NDT7_TESTABLE(snprintf)(endpoint, sizeof(endpoint), "%s:%s",
                                         settings->hostname, settings->port);
   if (epntsiz < 0 || (size_t)epntsiz >= sizeof(endpoint)) {
