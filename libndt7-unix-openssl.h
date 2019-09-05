@@ -19,6 +19,12 @@
  *
  * You can set `-D NDT7_INSECURE` to disable TLS certs verification.
  *
+ * There is a bunch of macros prefixed by `NDT7_CB` that you typically wanna
+ * define before including this header, e.g. NDT7_CB_HTTP_REQUEST. Using
+ * such macros, you can inject code allowing you to handle specific events
+ * occurring during ndt7 subtests (e.g. a speed measurement). Each undefined
+ * macro will be defined by libndt7-unix-openssl.h to do nothing.
+ *
  * See the ndt7-unix-openssl.c file for more insights.
  */
 
