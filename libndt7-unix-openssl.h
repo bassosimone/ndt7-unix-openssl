@@ -646,6 +646,12 @@ static long ndt7_elapsed_millisecond_(struct timeval begin, struct timeval now) 
       (long)now.tv_usec - (long)begin.tv_usec) / 1000L;
 }
 
+#ifndef NDT7_GETTIMEOFDAY
+/* Allows you to override the function implementing gettimeofday. You want to
+ * do that (1) to use a better function or (2) for testing. */
+#define NDT7_GETTIMEOFDAY gettimeofday
+#endif /* NDT7_GETTIMEOFDAY */
+
 static int ndt7_download_with_buffer_(
     const struct ndt7_settings *settings, char *base, const size_t count) {
   if (settings == NULL || base == NULL || count <= 0) {
@@ -663,8 +669,10 @@ static int ndt7_download_with_buffer_(
     return ctx.err;
   }
   struct timeval begin;
-  /* TODO(bassosimone): gettimeofday is not monotonic. */
-  (void)gettimeofday(&begin, NULL);
+  if (NDT7_GETTIMEOFDAY(&begin, NULL) != 0) {
+    BIO_free_all(ctx.conn);
+    return NDT7_ERR_GETTIMEOFDAY;
+  }
   size_t totalbytes = 0;
   size_t n = 0;
   struct timeval prev = begin;
@@ -676,7 +684,10 @@ static int ndt7_download_with_buffer_(
     }
     totalbytes += n;
     struct timeval now;
-    (void)gettimeofday(&now, NULL);
+    if (NDT7_GETTIMEOFDAY(&now, NULL) != 0) {
+      BIO_free_all(ctx.conn);
+      return NDT7_ERR_GETTIMEOFDAY;
+    }
     long elapsed = ndt7_elapsed_millisecond_(begin, now);
     if (ndt7_elapsed_millisecond_(prev, now) > 250) {
       prev = now;
@@ -785,8 +796,10 @@ static int ndt7_upload_with_buffer_(
     return NDT7_ERR_OVERFLOW;
   }
   struct timeval begin;
-  /* TODO(bassosimone): gettimeofday is not monotonic. */
-  (void)gettimeofday(&begin, NULL);
+  if (NDT7_GETTIMEOFDAY(&begin, NULL) != 0) {
+    BIO_free_all(ctx.conn);
+    return NDT7_ERR_GETTIMEOFDAY;
+  }
   struct timeval prev = begin;
   size_t totalbytes = 0;
   while ((ctx.err = NDT7_TESTABLE(ndt7_bio_writeall_)(
@@ -797,7 +810,10 @@ static int ndt7_upload_with_buffer_(
     }
     totalbytes += framesize;
     struct timeval now;
-    (void)gettimeofday(&now, NULL);
+    if (NDT7_GETTIMEOFDAY(&now, NULL) != 0) {
+      BIO_free_all(ctx.conn);
+      return NDT7_ERR_GETTIMEOFDAY;
+    }
     long elapsed = ndt7_elapsed_millisecond_(begin, now);
     if (elapsed > 10000) {
       break;
