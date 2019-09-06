@@ -396,6 +396,15 @@ static int ndt7_bio_readline_(BIO *conn, char *buf, int count) {
   return NDT7_ERR_IMPL_HEADER_LINE_TOO_LONG;
 }
 
+static int ndt7_response_line_is_101_(const char *s) {
+  /* Note: here @p s is a zero terminated string. */
+  return *s++ == 'H' && *s++ == 'T' && *s++ == 'T' && *s++ == 'P' &&
+      *s++ == '/' && *s++ == '1' && *s++ == '.' && *s++ == '1' &&
+      *s++ == ' ' && *s++ == '1' && *s++ == '0' && *s++ == '1' && (
+        *s == ' ' || *s == '\0'
+      );
+}
+
 static int
 ndt7_start_(BIO *conn, const char *hostname, const char *subtest,
             const char *ua, char *base, const size_t count) {
@@ -427,8 +436,7 @@ ndt7_start_(BIO *conn, const char *hostname, const char *subtest,
   if (ret != 0) {
     return ret;
   }
-  /* TODO(bassosimone): we should ignore the reason. */
-  if (NDT7_TESTABLE(strcasecmp)(base, "HTTP/1.1 101 Switching Protocols") != 0) {
+  if (!NDT7_TESTABLE(ndt7_response_line_is_101_)(base)) {
     return NDT7_ERR_HTTP_UNHANDLED_RESPONSE_LINE;
   }
   int sec_websocket_protocol = 0;
