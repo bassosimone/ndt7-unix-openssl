@@ -198,6 +198,9 @@
 /** malloc failed. */
 #define NDT7_ERR_MALLOC 30
 
+/** RAND_bytes failed. */
+#define NDT7_ERR_RAND_BYTES 31
+
 /*
  * API
  */
@@ -235,10 +238,12 @@ int ndt7_upload(const struct ndt7_settings *settings);
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
 #include <openssl/bio.h>
+#include <openssl/rand.h>
 #include <openssl/ssl.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
@@ -731,11 +736,13 @@ static int ndt7_ws_prepare_frame_(
     return NDT7_ERR_INVALID_ARGUMENT;
   }
   size_t required = desired;
-  if (ndt7_ws_make_bufsiz_(&required) != 0 || required > count) {
+  if (NDT7_TESTABLE(ndt7_ws_make_bufsiz_)(&required) != 0 || required > count) {
     return NDT7_ERR_INVALID_ARGUMENT;
   }
-  /* TODO(bassosimone): the mask should be random. */
-  const unsigned char mask[NDT7_WS_MASK_SIZE] = {7, 1, 1, 7};
+  unsigned char mask[NDT7_WS_MASK_SIZE];
+  if (NDT7_TESTABLE(RAND_bytes)(mask, NDT7_WS_MASK_SIZE) != 1) {
+    return NDT7_ERR_RAND_BYTES;
+  }
   size_t off = 0;
   /*
    * Header and length.
@@ -768,9 +775,14 @@ static int ndt7_ws_prepare_frame_(
   /*
    * Body
    */
+  if (required < off || (required - off) > INT_MAX) {
+    return NDT7_ERR_OVERFLOW;
+  }
+  if (NDT7_TESTABLE(RAND_bytes)(&frame[off], (int)(required - off)) != 1) {
+    return NDT7_ERR_RAND_BYTES;
+  }
   for (size_t i = 0; off < required; off++, i++) {
-    /* TODO(bassosimone): the body should be random. */
-    frame[off] = (unsigned char)('A' ^ mask[i % NDT7_WS_MASK_SIZE]);
+    frame[off] = (unsigned char)(frame[off] ^ mask[i % NDT7_WS_MASK_SIZE]);
   }
   *framesize = off;
   return 0;
