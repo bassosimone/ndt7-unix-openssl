@@ -48,7 +48,7 @@ Note that, by default, this code assumes that the CA bundle path is
 at `/etc/ssl/cert.pem`. Change this by setting
 
 ```
-export CFLAGS="-DCA_BUNDLE_PATH=/path/to/CA/bundle
+export CFLAGS='-DCA_BUNDLE_PATH=\"/path/to/CA/bundle\"'
 ```
 
 _before_ running CMake.
