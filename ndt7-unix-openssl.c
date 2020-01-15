@@ -31,11 +31,11 @@
 
 /* This is the callback called when we have an application level measurement
  * during the upload. We emit a JSON on the standard output. */
-#define NDT7_CB_NDT7_ON_APP_INFO_UPLOAD(elapsed, total)                        \
-  do {                                                                         \
-    fprintf(stdout, "{\"elapsed\": %f, \"app_info\": {\"num_bytes\": %zu}}\n", \
-            (double)elapsed / 1000.0, total);                                  \
-    fflush(stdout);                                                            \
+#define NDT7_CB_NDT7_ON_APP_INFO_UPLOAD(elapsed, total)                          \
+  do {                                                                           \
+    fprintf(stdout, "{\"AppInfo\": {\"ElapsedTime\": %ld, \"NumByes\": %zu}}\n", \
+            elapsed * 1000, total);                                              \
+    fflush(stdout);                                                              \
   } while (0)
 
 /* This is the callback called when an OpenSSL function fails. */

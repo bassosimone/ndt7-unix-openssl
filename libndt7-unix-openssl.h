@@ -28,7 +28,7 @@
  * Including this header also includes the implementation inline unless
  * you set `-D NDT7_NO_INLINE_IMPL`.
  *
- * See the ndt7-unix-openssl.c file for more insights.
+ * See the ndt7-unix-openssl.c file for further insights.
  */
 
 /*
@@ -514,7 +514,7 @@ ndt7_start_(BIO *conn, const char *hostname, const char *subtest,
 #define NDT7_WS_MAX_HEADER_SIZE 14
 
 /* Computes the size of a WebSocket frame holding count payload bytes */
-static int ndt7_ws_make_bufsiz_(size_t *count) {
+static int ndt7_ws_compute_bufsiz_(size_t *count) {
   if (*count < 126) {
     *count += NDT7_WS_MIN_HEADER_SIZE;
     return 0;
@@ -599,7 +599,7 @@ static int ndt7_ws_recv_frame_(
        * most significant bit MUST be 0." */
       return NDT7_ERR_WS_INVALID_LENGTH_MSB;
     }
-    /* Artifically restrict the length to 32 bit to avoid issues with 32 bit
+    /* Artificially restrict the length to 32 bit to avoid issues with 32 bit
      * systems. Note that this is larger than ndt7 max message size. */
     if (buf[0] != 0 || buf[1] != 0 || buf[2] != 0 || buf[3] != 0) {
       return NDT7_ERR_IMPL_MESSAGE_TOO_LARGE;
@@ -626,6 +626,9 @@ static int ndt7_ws_recv_frame_(
     }
     if (opcode == NDT7_WS_OPCODE_TEXT) {
       NDT7_CB_NDT7_ON_MEASUREMENT_PART(base, maxread);
+    } else if (opcode == NDT7_WS_OPCODE_PING) {
+      /* TODO(bassosimone): here we should handle this PING. For now
+         we're just going to ignore PING messages. */
     }
     assert(length >= maxread);
     length -= maxread;
@@ -634,10 +637,9 @@ static int ndt7_ws_recv_frame_(
     NDT7_CB_NDT7_END_READ_MEASUREMENT();
   }
   /*
-   * Now deal with all the messages we don't support.
+   * Now deal with all the messages we don't support yet.
    */
-  if (opcode == NDT7_WS_OPCODE_CONTINUE || opcode == NDT7_WS_OPCODE_PING ||
-      opcode == NDT7_WS_OPCODE_PONG) {
+  if (opcode == NDT7_WS_OPCODE_CONTINUE || opcode == NDT7_WS_OPCODE_PONG) {
     return NDT7_ERR_IMPL_UNHANDLED_OPCODE;
   }
   if (!fin) {
@@ -716,7 +718,7 @@ int ndt7_download(const struct ndt7_settings *settings) {
     return NDT7_ERR_INVALID_ARGUMENT;
   }
   size_t siz = NDT7_MAX_MESSAGE_SIZE;
-  int err = NDT7_TESTABLE(ndt7_ws_make_bufsiz_)(&siz);
+  int err = NDT7_TESTABLE(ndt7_ws_compute_bufsiz_)(&siz);
   if (err != 0) {
     return err;
   }
@@ -736,7 +738,7 @@ static int ndt7_ws_prepare_frame_(
     return NDT7_ERR_INVALID_ARGUMENT;
   }
   size_t required = desired;
-  if (NDT7_TESTABLE(ndt7_ws_make_bufsiz_)(&required) != 0 || required > count) {
+  if (NDT7_TESTABLE(ndt7_ws_compute_bufsiz_)(&required) != 0 || required > count) {
     return NDT7_ERR_INVALID_ARGUMENT;
   }
   unsigned char mask[NDT7_WS_MASK_SIZE];
@@ -852,7 +854,7 @@ int ndt7_upload(const struct ndt7_settings *settings) {
     return NDT7_ERR_INVALID_ARGUMENT;
   }
   size_t siz = NDT7_MAX_MESSAGE_SIZE;
-  int err = NDT7_TESTABLE(ndt7_ws_make_bufsiz_)(&siz);
+  int err = NDT7_TESTABLE(ndt7_ws_compute_bufsiz_)(&siz);
   if (err != 0) {
     return err;
   }
